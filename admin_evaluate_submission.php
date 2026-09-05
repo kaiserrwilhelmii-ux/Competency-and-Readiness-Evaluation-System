@@ -1,16 +1,14 @@
 <?php
 session_start();
-include_once __DIR__ . '/db_connect.php';
-include_once __DIR__ . '/ai_helper.php';
+include __DIR__ . '/db_connect.php';
+include __DIR__ . '/ai_helper.php';
 
 function extractTextForEvaluation($filePath) {
     if (!file_exists($filePath)) { return "[SYSTEM ALERT: File missing. Evaluate based on Description only.]"; }
     $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
     $text = "";
     
-    if ($ext === 'pdf') { 
-        return "[SYSTEM ALERT: PDF uploaded and attached natively for multimodal evaluation.]"; 
-    }
+    if ($ext === 'pdf') { return "[SYSTEM ALERT: PDF uploaded. AI cannot read PDFs. Evaluate based on Description only.]"; }
 
     if ($ext === 'docx') {
         if (class_exists('ZipArchive')) {
@@ -25,20 +23,20 @@ function extractTextForEvaluation($filePath) {
                 $zip->close();
             }
         } else {
-            // Shell fallback
+            // RAILWAY CLOUD BYPASS: Use Linux shell to unzip if PHP extension is disabled
             $xml = @shell_exec("unzip -p " . escapeshellarg($filePath) . " word/document.xml 2>/dev/null");
             if ($xml) {
                 $dom = new DOMDocument;
                 @$dom->loadXML($xml, LIBXML_NOENT | LIBXML_XINCLUDE | LIBXML_NOERROR | LIBXML_NOWARNING);
                 $text = strip_tags($dom->saveXML());
             } else {
-                return "[SYSTEM ALERT: Cannot extract DOCX text. Evaluate based on Description.]";
+                return "[SYSTEM ALERT: Cannot extract DOCX on this server. Evaluate based on Description only.]";
             }
         }
     } elseif ($ext === 'txt') {
         $text = file_get_contents($filePath);
     } else {
-        return "[SYSTEM NOTE: File type .$ext not directly text-readable. Evaluate based on Description.]";
+        return "[SYSTEM NOTE: File type .$ext not supported.]";
     }
 
     $text = preg_replace('/[\x00-\x1F\x7F]/u', ' ', $text); 
@@ -56,14 +54,9 @@ $sub = $sub_q->fetch_assoc();
 
 $extracted_file_text = "";
 $file_content_msg = "";
-$pdf_base64 = null;
 $actual_path = __DIR__ . '/' . ltrim(str_replace(['../', '..\\'], '', $sub['file_path']), '/\\');
 
 if (!empty($sub['file_path']) && file_exists($actual_path)) {
-    $ext = strtolower(pathinfo($actual_path, PATHINFO_EXTENSION));
-    if ($ext === 'pdf') {
-        $pdf_base64 = base64_encode(file_get_contents($actual_path));
-    }
     $extracted_file_text = extractTextForEvaluation($actual_path);
     $file_content_msg = "\n\n=== [EVIDENCE FILE CONTENT] ===\n" . $extracted_file_text . "\n==============================\n";
 }
@@ -79,7 +72,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['send_chat'])) {
     if (!empty($message)) {
         $stmt = $conn->prepare("INSERT INTO chat_logs (user_id, sender, message) VALUES (?, 'user', ?)");
         $stmt->bind_param("is", $admin_id, $message); $stmt->execute();
-        $ai_response = generateAIResponse("Context:\n$context\n\nUser Question: $message", 'consultant', $pdf_base64);
+        $ai_response = generateAIResponse("Context:\n$context\n\nUser Question: $message", 'consultant');
         $stmt = $conn->prepare("INSERT INTO chat_logs (user_id, sender, message) VALUES (?, 'ai', ?)");
         $stmt->bind_param("is", $admin_id, $ai_response); $stmt->execute();
         header("Location: " . $_SERVER['REQUEST_URI']); exit();
@@ -88,50 +81,44 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['send_chat'])) {
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     if (isset($_POST['generate_ai'])) {
-        $full_prompt = "You are a professional teacher evaluator grading a lesson plan based on the Philippine Professional Standards for Teachers (PPST). Use this exact 100-point rubric:
-1. Objectives (Max 20 pts)
-2. Content (Max 20 pts)
-3. Methodology (Max 30 pts)
-4. Assessment (Max 20 pts)
-5. Formatting (Max 10 pts)
-
-Student Work Details:
-" . $master_context . "
-
-CRITICAL: Return ONLY valid JSON format with exact integer scores and constructive feedback:
-{
-    \"obj\": 18,
-    \"con\": 16,
-    \"meth\": 25,
-    \"ass\": 17,
-    \"fmt\": 9,
-    \"total\": 85,
-    \"feedback\": \"Detailed breakdown and feedback for the student...\"
-}";
+        $full_prompt = "You are a professional teacher evaluator grading a lesson plan. Use this exact 100-point rubric:
+        1. Objectives (Max 20)
+        2. Content (Max 20)
+        3. Methodology (Max 30)
+        4. Assessment (Max 20)
+        5. Formatting (Max 10)
         
-        $raw_ai_text = generateAIResponse($full_prompt, 'rubric_evaluator', $pdf_base64);
+        Student Work: " . $master_context . "
+        
+        CRITICAL: If the document content contains a SYSTEM ALERT about a missing or unreadable file, DO NOT PANIC AND DO NOT FAIL. You MUST evaluate the lesson plan based SOLELY on the 'Student Context Description'.
+        
+        RETURN ONLY VALID JSON EXACTLY LIKE THIS FORMAT. DO NOT ADD ANY OTHER TEXT:
+        {
+            \"obj\": 18,
+            \"con\": 15,
+            \"meth\": 25,
+            \"ass\": 15,
+            \"fmt\": 10,
+            \"total\": 83,
+            \"feedback\": \"Detailed feedback...\"
+        }";
+        
+        $raw_ai_text = generateAIResponse($full_prompt, 'evaluator');
         if (preg_match('/\{[\s\S]*\}/', $raw_ai_text, $matches)) {
             $parsed = json_decode($matches[0], true);
             if ($parsed && isset($parsed['total'])) {
-                $ai_scores = $parsed; 
-                $ai_feedback = $parsed['feedback'] ?? '';
-            } else { 
-                $ai_feedback = "AI JSON Error. Raw output: " . $matches[0]; 
-            }
-        } else { 
-            $ai_feedback = "AI response received. Output:\n" . $raw_ai_text; 
-        }
+                $ai_scores = $parsed; $ai_feedback = $parsed['feedback'];
+            } else { $ai_feedback = "AI JSON Error. Raw output: " . $matches[0]; }
+        } else { $ai_feedback = "AI failed to return the scoring format. Raw output: " . $raw_ai_text; }
 
     } elseif (isset($_POST['submit_grade'])) {
-        $eval_title = $_POST['eval_title']; 
-        $score = intval($_POST['human_total']); 
-        $notes = "RUBRIC BREAKDOWN:\nObjectives: " . ($_POST['human_obj'] ?? 0) . "/20\nContent: " . ($_POST['human_con'] ?? 0) . "/20\nMethodology: " . ($_POST['human_meth'] ?? 0) . "/30\nAssessment: " . ($_POST['human_ass'] ?? 0) . "/20\nFormatting: " . ($_POST['human_fmt'] ?? 0) . "/10\n\nFEEDBACK:\n" . $_POST['notes']; 
+        $eval_title = $_POST['eval_title']; $score = $_POST['human_total']; 
+        $notes = "RUBRIC BREAKDOWN:\nObjectives: " . $_POST['human_obj'] . "/20\nContent: " . $_POST['human_con'] . "/20\nMethodology: " . $_POST['human_meth'] . "/30\nAssessment: " . $_POST['human_ass'] . "/20\nFormatting: " . $_POST['human_fmt'] . "/10\n\nFEEDBACK:\n" . $_POST['notes']; 
         
         $student_id = $sub['user_id'];
         $target_file = $sub['file_path'];
         if (!empty($_FILES['file']['name'])) {
             $target_dir = "uploads/";
-            if (!is_dir($target_dir)) { mkdir($target_dir, 0777, true); }
             $target_file = $target_dir . "admin_" . time() . "_" . basename($_FILES["file"]["name"]);
             move_uploaded_file($_FILES["file"]["tmp_name"], $target_file);
         }
@@ -185,8 +172,10 @@ $file_url = htmlspecialchars($sub['file_path']);
         
         .action-container { display: flex; flex-direction: column; gap: 15px; margin-top: 20px; border-top: 2px dashed #eee; padding-top: 20px; }
         
-        .btn-run-ai { background: linear-gradient(135deg, #8e44ad 0%, #9b59b6 100%); color: white; border: none; padding: 15px; border-radius: 6px; font-weight: bold; font-size: 15px; display: flex; justify-content: center; align-items: center; gap: 10px; box-shadow: 0 4px 15px rgba(142, 68, 173, 0.3); transition: all 0.3s; cursor: pointer; }
-        .btn-run-ai:hover { transform: translateY(-2px); }
+        /* NEW BUTTON STYLES FOR LOCKOUT LOGIC */
+        .btn-run-ai { background: linear-gradient(135deg, #8e44ad 0%, #9b59b6 100%); color: white; border: none; padding: 15px; border-radius: 6px; font-weight: bold; font-size: 15px; display: flex; justify-content: center; align-items: center; gap: 10px; box-shadow: 0 4px 15px rgba(142, 68, 173, 0.3); transition: all 0.3s; }
+        .btn-run-ai:not(:disabled):hover { transform: translateY(-2px); cursor: pointer; }
+        .btn-run-ai:disabled { background: #bdc3c7; box-shadow: none; cursor: not-allowed; opacity: 0.7; }
         
         .btn-submit-official { background: #27ae60; color: white; border: none; padding: 15px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 15px; display: flex; justify-content: center; align-items: center; gap: 10px; box-shadow: 0 4px 15px rgba(39, 174, 96, 0.3); transition: background 0.2s; }
         .btn-submit-official:hover { background: #2ecc71; }
@@ -238,23 +227,23 @@ $file_url = htmlspecialchars($sub['file_path']);
                             <div class="dual-rubric">
                                 <div class="rubric-side">
                                     <h4 style="margin-top:0; color:#2c3e50; border-bottom:1px solid #ccc; padding-bottom:5px;">AI Suggested Score</h4>
-                                    <div class="rubric-row"><span>1. Objectives (20)</span> <input type="text" class="rubric-input ai-input" id="ai_obj" value="<?= htmlspecialchars($ai_scores['obj'] ?? '') ?>" readonly></div>
-                                    <div class="rubric-row"><span>2. Content (20)</span> <input type="text" class="rubric-input ai-input" id="ai_con" value="<?= htmlspecialchars($ai_scores['con'] ?? '') ?>" readonly></div>
-                                    <div class="rubric-row"><span>3. Methodology (30)</span> <input type="text" class="rubric-input ai-input" id="ai_meth" value="<?= htmlspecialchars($ai_scores['meth'] ?? '') ?>" readonly></div>
-                                    <div class="rubric-row"><span>4. Assessment (20)</span> <input type="text" class="rubric-input ai-input" id="ai_ass" value="<?= htmlspecialchars($ai_scores['ass'] ?? '') ?>" readonly></div>
-                                    <div class="rubric-row"><span>5. Formatting (10)</span> <input type="text" class="rubric-input ai-input" id="ai_fmt" value="<?= htmlspecialchars($ai_scores['fmt'] ?? '') ?>" readonly></div>
-                                    <div class="rubric-total" style="color:#2980b9;">AI Total: <span id="ai_total"><?= empty($ai_scores['total']) ? '0' : htmlspecialchars($ai_scores['total']) ?></span>/100</div>
+                                    <div class="rubric-row"><span>1. Objectives (20)</span> <input type="text" class="rubric-input ai-input" id="ai_obj" value="<?= $ai_scores['obj'] ?>" readonly></div>
+                                    <div class="rubric-row"><span>2. Content (20)</span> <input type="text" class="rubric-input ai-input" id="ai_con" value="<?= $ai_scores['con'] ?>" readonly></div>
+                                    <div class="rubric-row"><span>3. Methodology (30)</span> <input type="text" class="rubric-input ai-input" id="ai_meth" value="<?= $ai_scores['meth'] ?>" readonly></div>
+                                    <div class="rubric-row"><span>4. Assessment (20)</span> <input type="text" class="rubric-input ai-input" id="ai_ass" value="<?= $ai_scores['ass'] ?>" readonly></div>
+                                    <div class="rubric-row"><span>5. Formatting (10)</span> <input type="text" class="rubric-input ai-input" id="ai_fmt" value="<?= $ai_scores['fmt'] ?>" readonly></div>
+                                    <div class="rubric-total" style="color:#2980b9;">AI Total: <span id="ai_total"><?= empty($ai_scores['total']) ? '0' : $ai_scores['total'] ?></span>/100</div>
                                     <button type="button" onclick="copyAIScores()" style="width:100%; padding:5px; margin-top:10px; background:#bdc3c7; border:none; border-radius:4px; cursor:pointer;"><i class="fas fa-arrow-right"></i> Copy AI Scores</button>
                                 </div>
 
                                 <div class="rubric-side" style="border-color:#3498db; background:#f0f8ff;">
                                     <h4 style="margin-top:0; color:#2980b9; border-bottom:1px solid #3498db; padding-bottom:5px;">Step 1: Official Grade</h4>
-                                    <div class="rubric-row"><span>1. Objectives (20)</span> <input type="number" name="human_obj" class="rubric-input human-calc" id="h_obj" max="20" min="0" required></div>
-                                    <div class="rubric-row"><span>2. Content (20)</span> <input type="number" name="human_con" class="rubric-input human-calc" id="h_con" max="20" min="0" required></div>
-                                    <div class="rubric-row"><span>3. Methodology (30)</span> <input type="number" name="human_meth" class="rubric-input human-calc" id="h_meth" max="30" min="0" required></div>
-                                    <div class="rubric-row"><span>4. Assessment (20)</span> <input type="number" name="human_ass" class="rubric-input human-calc" id="h_ass" max="20" min="0" required></div>
-                                    <div class="rubric-row"><span>5. Formatting (10)</span> <input type="number" name="human_fmt" class="rubric-input human-calc" id="h_fmt" max="10" min="0" required></div>
-                                    <input type="hidden" name="human_total" id="h_total_input" value="0">
+                                    <div class="rubric-row"><span>1. Objectives (20)</span> <input type="number" name="human_obj" class="rubric-input human-calc" id="h_obj" max="20" required></div>
+                                    <div class="rubric-row"><span>2. Content (20)</span> <input type="number" name="human_con" class="rubric-input human-calc" id="h_con" max="20" required></div>
+                                    <div class="rubric-row"><span>3. Methodology (30)</span> <input type="number" name="human_meth" class="rubric-input human-calc" id="h_meth" max="30" required></div>
+                                    <div class="rubric-row"><span>4. Assessment (20)</span> <input type="number" name="human_ass" class="rubric-input human-calc" id="h_ass" max="20" required></div>
+                                    <div class="rubric-row"><span>5. Formatting (10)</span> <input type="number" name="human_fmt" class="rubric-input human-calc" id="h_fmt" max="10" required></div>
+                                    <input type="hidden" name="human_total" id="h_total_input">
                                     <div class="rubric-total" style="color:#27ae60;">Official Total: <span id="h_total_display">0</span>/100</div>
                                 </div>
                             </div>
@@ -265,11 +254,11 @@ $file_url = htmlspecialchars($sub['file_path']);
                             </div>
                             
                             <div class="action-container">
-                                <button type="submit" name="generate_ai" id="runAiBtn" class="btn-run-ai">
-                                    <i class="fas fa-magic"></i> Run AI Analyzer
+                                <button type="submit" name="generate_ai" id="runAiBtn" class="btn-run-ai" disabled title="Please fill all 5 official grade boxes first.">
+                                    <i class="fas fa-magic"></i> Step 2: Run AI Analyzer (Fill Rubric First)
                                 </button>
                                 <button type="submit" name="submit_grade" class="btn-submit-official">
-                                    <i class="fas fa-check-circle"></i> Submit Final Grade & Finish
+                                    <i class="fas fa-check-circle"></i> Step 3: Submit Final Grade & Finish
                                 </button>
                             </div>
                         </div>
@@ -315,18 +304,30 @@ $file_url = htmlspecialchars($sub['file_path']);
         const humanInputs = document.querySelectorAll('.human-calc');
         const hTotalDisplay = document.getElementById('h_total_display');
         const hTotalInput = document.getElementById('h_total_input');
+        const aiBtn = document.getElementById('runAiBtn');
 
         function checkHumanInputsAndTotal() {
             let total = 0;
+            let allFilled = true;
             humanInputs.forEach(input => { 
+                if (input.value === "") { allFilled = false; }
                 total += Number(input.value) || 0; 
             });
             hTotalDisplay.innerText = total;
             hTotalInput.value = total;
+            
+            // LOCKOUT LOGIC: Disable AI button until human inputs are filled
+            if(allFilled) {
+                aiBtn.disabled = false;
+                aiBtn.innerHTML = '<i class="fas fa-magic"></i> Step 2: Run AI Analyzer';
+            } else {
+                aiBtn.disabled = true;
+                aiBtn.innerHTML = '<i class="fas fa-lock"></i> Step 2: Run AI Analyzer (Fill Rubric First)';
+            }
         }
 
         humanInputs.forEach(input => { input.addEventListener('input', checkHumanInputsAndTotal); });
-        checkHumanInputsAndTotal();
+        checkHumanInputsAndTotal(); // Run on load
 
         function copyAIScores() {
             document.getElementById('h_obj').value = document.getElementById('ai_obj').value || 0;

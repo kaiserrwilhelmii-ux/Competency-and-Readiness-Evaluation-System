@@ -1,14 +1,6 @@
 <?php
 // landing.php - AI Lesson Plan Evaluator Landing Page
-session_start();
-$is_logged_in = isset($_SESSION['user_id']);
-$dashboard_url = 'dashboard.php';
-if ($is_logged_in) {
-    if (($_SESSION['role'] ?? '') === 'admin') $dashboard_url = 'admin_dashboard.php';
-    elseif (($_SESSION['role'] ?? '') === 'supervisor') $dashboard_url = 'supervisor_dashboard.php';
-}
-?>
-<!DOCTYPE html>
+?><!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -37,15 +29,11 @@ if ($is_logged_in) {
             backdrop-filter: blur(10px);
             position: sticky;
             top: 0;
-            z-index: 100;
         }
 
         .logo {
             font-size: 1.6rem;
             font-weight: bold;
-            display: flex;
-            align-items: center;
-            gap: 10px;
         }
 
         .nav-buttons a {
@@ -110,6 +98,13 @@ if ($is_logged_in) {
             font-size: 1.1rem;
             margin-bottom: 20px;
             box-shadow: 0 10px 25px rgba(0,0,0,0.25);
+        }
+
+        .hero-text p {
+            font-size: 1.15rem;
+            line-height: 1.8;
+            color: #dbeafe;
+            margin-bottom: 30px;
         }
 
         .cta-buttons a {
@@ -207,15 +202,10 @@ if ($is_logged_in) {
 <body>
 
     <nav class="navbar">
-        <div class="logo">🎓 CORE</div>
+        <div class="logo">CORE</div>
         <div class="nav-buttons">
-            <?php if ($is_logged_in): ?>
-                <a href="<?php echo $dashboard_url; ?>" class="login-btn">My Dashboard</a>
-                <a href="logout.php" class="register-btn">Logout</a>
-            <?php else: ?>
-                <a href="index.php" class="login-btn">Login</a>
-                <a href="register.php" class="register-btn">Register</a>
-            <?php endif; ?>
+            <a href="index.php" class="login-btn">Login</a>
+            <a href="register.php" class="register-btn">Register</a>
         </div>
     </nav>
 
@@ -229,22 +219,18 @@ if ($is_logged_in) {
                 and personalized improvement recommendations.
             </p>
             <div class="cta-buttons">
-                <?php if ($is_logged_in): ?>
-                    <a href="<?php echo $dashboard_url; ?>" class="primary-btn">Go to Dashboard</a>
-                <?php else: ?>
-                    <a href="index.php" class="primary-btn">Get Started</a>
-                    <a href="register.php" class="secondary-btn">Create Account</a>
-                <?php endif; ?>
+                <a href="index.php" class="primary-btn">Get Started</a>
+                <a href="register.php" class="secondary-btn">Create Account</a>
             </div>
         </div>
 
         <div class="hero-card">
             <h3>What AI Evaluates</h3>
-            <div class="feature">📘 Lesson Objectives Alignment (HOTS)</div>
-            <div class="feature">🧠 Teaching Methodology & Strategies</div>
-            <div class="feature">📊 Assessment & Evaluation Tool Validity</div>
-            <div class="feature">✍️ Structure, Clarity, and Professional Flow</div>
-            <div class="feature">🎯 PPST Standards & Curriculum Compliance</div>
+            <div class="feature">📘 Lesson Objectives Alignment</div>
+            <div class="feature">🧠 Teaching Methodology Quality</div>
+            <div class="feature">📊 Assessment Strategy Review</div>
+            <div class="feature">✍️ Structure, Clarity, and Completeness</div>
+            <div class="feature">🎯 Standards & Curriculum Compliance</div>
         </div>
     </section>
 
@@ -252,20 +238,20 @@ if ($is_logged_in) {
         <h2>Why Choose CORE?</h2>
         <div class="feature-grid">
             <div class="feature-box">
-                <h3>⚡ Instant Feedback</h3>
+                <h3>Instant Feedback</h3>
                 <p>Eliminate long manual checking by generating evaluations in seconds.</p>
             </div>
             <div class="feature-box">
-                <h3>📋 100-Point Rubric</h3>
-                <p>Evaluate lesson plans using standardized Philippine teacher education criteria.</p>
+                <h3>Rubric-Based Scoring</h3>
+                <p>Evaluate lesson plans using standardized academic criteria.</p>
             </div>
             <div class="feature-box">
-                <h3>💡 Support Copilot</h3>
-                <p>Interactive AI mentor providing actionable suggestions to strengthen teaching plans.</p>
+                <h3>Smart Recommendations</h3>
+                <p>AI suggests specific improvements to strengthen teaching plans.</p>
             </div>
             <div class="feature-box">
-                <h3>🚀 Cloud Ready</h3>
-                <p>Lightweight, resilient deployment structure ready for Railway and modern hosting.</p>
+                <h3>Railway Ready</h3>
+                <p>PHP-compatible lightweight deployment structure for Railway hosting.</p>
             </div>
         </div>
     </section>

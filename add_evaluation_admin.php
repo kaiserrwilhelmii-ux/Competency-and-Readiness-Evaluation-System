@@ -1,6 +1,6 @@
 <?php
 session_start();
-include_once __DIR__ . '/db_connect.php';
+include __DIR__ . '/db_connect.php';
 
 if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') { header("Location: index.php"); exit(); }
 
@@ -9,18 +9,17 @@ $students = $conn->query("SELECT * FROM users WHERE role='student_teacher' ORDER
 
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_grade'])) {
     $student_id = intval($_POST['student_id']);
-    $eval_title = trim($_POST['eval_title']);
-    $score = intval($_POST['score']);
-    $notes = trim($_POST['notes']);
+    $eval_title = $_POST['eval_title'];
+    $score = $_POST['score'];
+    $notes = $_POST['notes'];
     
     $stmt = $conn->prepare("INSERT INTO evaluations (user_id, evaluator_id, submission_id, evaluation_title, competency_score, readiness_notes, status, upload_date) VALUES (?, ?, 0, ?, ?, ?, 'accepted', NOW())");
-    if ($stmt) {
-        $stmt->bind_param("iisss", $student_id, $admin_id, $eval_title, $score, $notes);
-        if($stmt->execute()) {
-            $new_eval_id = $conn->insert_id;
-            header("Location: admin_view_evaluation.php?id=$new_eval_id");
-            exit();
-        }
+    $stmt->bind_param("iisss", $student_id, $admin_id, $eval_title, $score, $notes);
+    
+    if($stmt->execute()) {
+        $new_eval_id = $conn->insert_id;
+        header("Location: admin_view_evaluation.php?id=$new_eval_id");
+        exit();
     }
 }
 ?>
@@ -31,7 +30,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_grade'])) {
     <link rel="stylesheet" href="css/style.css?v=<?php echo time(); ?>">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        body { display: flex !important; min-height: 100vh; overflow-x: hidden; margin: 0; background: #f4f7f6; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        /* --- FIXED SIDEBAR & LAYOUT CSS --- */
+        body { display: flex !important; min-height: 100vh; overflow-x: hidden; margin: 0; background: #f4f7f6; }
         .sidebar { width: 250px !important; flex-shrink: 0 !important; position: relative !important; z-index: 1000; min-height: 100vh; }
         .main-content { flex: 1 !important; margin-left: 0 !important; padding: 30px !important; width: calc(100% - 250px) !important; transition: none !important; }
         
@@ -96,9 +96,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_grade'])) {
                             <label class="modern-label">Select Student</label>
                             <select name="student_id" id="studentSelect" class="modern-input" required>
                                 <option value="">-- Choose a Student --</option>
-                                <?php if ($students): while($s = $students->fetch_assoc()): ?>
+                                <?php while($s = $students->fetch_assoc()): ?>
                                     <option value="<?php echo $s['id']; ?>"><?php echo htmlspecialchars($s['fullname']); ?></option>
-                                <?php endwhile; endif; ?>
+                                <?php endwhile; ?>
                             </select>
                         </div>
 
@@ -196,17 +196,17 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['submit_grade'])) {
                 headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
                 body: JSON.stringify(payload) 
             })
-            .then(response => response.json())
-            .then(data => {
-                if(data.error) { 
-                    addMessageToUI('System Error', data.error, 'ai'); 
-                } else if(data.reply) { 
-                    addMessageToUI('Copilot', data.reply, 'ai'); 
+            .then(response => response.text())
+            .then(text => {
+                try {
+                    const data = JSON.parse(text);
+                    if(data.error) { addMessageToUI('System Error', data.error, 'ai'); } 
+                    else if(data.reply) { addMessageToUI('Copilot', data.reply, 'ai'); }
+                } catch (e) {
+                    addMessageToUI('System Error', 'Server blocked the request or session expired.', 'ai');
                 }
             })
-            .catch(error => { 
-                addMessageToUI('System Error', 'Connection Error.', 'ai'); 
-            })
+            .catch(error => { addMessageToUI('System Error', 'Connection Error.', 'ai'); })
             .finally(() => {
                 typingIndicator.style.display = 'none';
                 chatInput.disabled = false;

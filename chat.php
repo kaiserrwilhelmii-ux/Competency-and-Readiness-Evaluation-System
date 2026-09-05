@@ -1,63 +1,68 @@
 <?php
-// chat.php - AI Chat Endpoint for Website Support Copilot
-
 error_reporting(0);
-header("Content-Type: application/json; charset=UTF-8");
+header("Content-Type: application/json");
 session_start();
 
 // Check if user is logged in
 if (!isset($_SESSION['user_id'])) {
+    // Return a specific error code that our JavaScript can understand
     echo json_encode(["error" => "SESSION_EXPIRED"]);
     exit;
 }
 
-include_once __DIR__ . '/db_connect.php';
-include_once __DIR__ . '/ai_helper.php';
+$input = json_decode(file_get_contents("php://input"), true);
+$userMessage = $input['message'] ?? '';
+$context = $input['context'] ?? '';
 
-$user_id = $_SESSION['user_id'];
-$raw_input = file_get_contents("php://input");
-$input = json_decode($raw_input, true);
-
-if (!is_array($input)) {
-    $input = $_POST;
+// --- MAGIC SECRETS LOADER ---
+// If we are testing locally, look for the hidden .env file
+if (file_exists(__DIR__ . '/.env')) {
+    $lines = file(__DIR__ . '/.env', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    foreach ($lines as $line) {
+        if (strpos(trim($line), '#') === 0) continue;
+        list($name, $value) = explode('=', $line, 2);
+        $_ENV[trim($name)] = trim($value);
+    }
 }
 
-$userMessage = trim($input['message'] ?? '');
-$context = trim($input['context'] ?? '');
-$mode = trim($input['mode'] ?? 'mentor');
+// Grab the key safely from Railway's vault OR the local .env file
+$apiKey = getenv('GEMINI_API_KEY') ?: ($_ENV['GEMINI_API_KEY'] ?? '');
 
-if (empty($userMessage)) {
-    echo json_encode(["error" => "Message cannot be empty."]);
+if (empty($apiKey)) {
+    echo json_encode(["error" => "API Key is missing! Check Railway variables or your .env file."]);
     exit;
 }
 
-try {
-    // Log user message
-    $stmt = $conn->prepare("INSERT INTO chat_logs (user_id, sender, message) VALUES (?, 'user', ?)");
-    if ($stmt) {
-        $stmt->bind_param("is", $user_id, $userMessage);
-        $stmt->execute();
+$url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" . $apiKey;
+
+$prompt = "You are a helpful teaching assistant. Context: \n" . $context . "\n\nUser Question: " . $userMessage;
+
+$data = [
+    "contents" => [
+        ["parts" => [["text" => $prompt]]]
+    ]
+];
+
+$ch = curl_init($url);
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+curl_setopt($ch, CURLOPT_POST, true);
+curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+curl_setopt($ch, CURLOPT_HTTPHEADER, ["Content-Type: application/json"]);
+// Bypass SSL strictness on some servers
+curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); 
+
+$response = curl_exec($ch);
+curl_close($ch);
+
+$decoded = json_decode($response, true);
+
+if (isset($decoded['candidates'][0]['content']['parts'][0]['text'])) {
+    echo json_encode(["reply" => $decoded['candidates'][0]['content']['parts'][0]['text']]);
+} else {
+    if(isset($decoded['error']['message'])) {
+         echo json_encode(["error" => "Google API Error: " . $decoded['error']['message']]);
+    } else {
+         echo json_encode(["error" => "Unknown API Error. The key might be invalid."]);
     }
-
-    // Generate AI response
-    $fullPrompt = !empty($context) ? "Context:\n" . $context . "\n\nUser Question: " . $userMessage : $userMessage;
-    $reply = generateAIResponse($fullPrompt, $mode);
-
-    // Log AI response
-    $stmt_ai = $conn->prepare("INSERT INTO chat_logs (user_id, sender, message) VALUES (?, 'ai', ?)");
-    if ($stmt_ai) {
-        $stmt_ai->bind_param("is", $user_id, $reply);
-        $stmt_ai->execute();
-    }
-
-    echo json_encode([
-        "success" => true,
-        "reply" => $reply
-    ]);
-
-} catch (Throwable $e) {
-    echo json_encode([
-        "error" => "Error processing AI request: " . $e->getMessage()
-    ]);
 }
 ?>

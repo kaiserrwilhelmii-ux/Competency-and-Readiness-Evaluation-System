@@ -1,11 +1,10 @@
 <?php
 session_start();
-include_once __DIR__ . '/db_connect.php';
+include __DIR__ . '/db_connect.php';
 
 // Allows BOTH Admins and Supervisors to view the Master Scorecard Directory
 if (!isset($_SESSION['user_id']) || !in_array($_SESSION['role'], ['admin', 'supervisor'])) { 
-    header("Location: index.php"); 
-    exit(); 
+    header("Location: index.php"); exit(); 
 }
 $viewer_role = $_SESSION['role'];
 $student_id = isset($_GET['student_id']) ? intval($_GET['student_id']) : 0;
@@ -51,7 +50,7 @@ $student_id = isset($_GET['student_id']) ? intval($_GET['student_id']) : 0;
                         </tr>
                         <?php
                         $students = $conn->query("SELECT * FROM users WHERE role='student_teacher' ORDER BY fullname ASC");
-                        if ($students && $students->num_rows > 0):
+                        if ($students->num_rows > 0):
                             while($s = $students->fetch_assoc()):
                         ?>
                             <tr>
@@ -69,7 +68,7 @@ $student_id = isset($_GET['student_id']) ? intval($_GET['student_id']) : 0;
         <?php else: ?>
             <?php
             $stu_q = $conn->query("SELECT fullname FROM users WHERE id=$student_id");
-            $stu_name = ($stu_q && $stu_q->num_rows > 0) ? $stu_q->fetch_assoc()['fullname'] : "Unknown Student";
+            $stu_name = ($stu_q->num_rows > 0) ? $stu_q->fetch_assoc()['fullname'] : "Unknown Student";
             ?>
             <a href="admin_evaluations.php" class="btn-back"><i class="fas fa-arrow-left"></i> Back to Directory</a>
             
@@ -87,13 +86,12 @@ $student_id = isset($_GET['student_id']) ? intval($_GET['student_id']) : 0;
                             <th>Action</th>
                         </tr>
                         <?php
-                        $pending = $conn->query("SELECT * FROM submissions WHERE user_id=$student_id AND status='pending' ORDER BY id DESC");
-                        if ($pending && $pending->num_rows > 0):
+                        $pending = $conn->query("SELECT * FROM submissions WHERE user_id=$student_id AND status='pending' ORDER BY created_at DESC");
+                        if ($pending->num_rows > 0):
                             while($p = $pending->fetch_assoc()):
-                                $sub_date = !empty($p['upload_date']) ? $p['upload_date'] : ($p['created_at'] ?? 'now');
                         ?>
                             <tr>
-                                <td><?php echo date("M d, Y", strtotime($sub_date)); ?></td>
+                                <td><?php echo date("M d, Y", strtotime($p['created_at'])); ?></td>
                                 <td><strong><?php echo htmlspecialchars($p['title']); ?></strong></td>
                                 <td>
                                     <?php if ($viewer_role === 'admin'): ?>
@@ -121,13 +119,12 @@ $student_id = isset($_GET['student_id']) ? intval($_GET['student_id']) : 0;
                             <th>Action</th>
                         </tr>
                         <?php
-                        $completed = $conn->query("SELECT * FROM evaluations WHERE user_id=$student_id ORDER BY id DESC");
-                        if ($completed && $completed->num_rows > 0):
+                        $completed = $conn->query("SELECT * FROM evaluations WHERE user_id=$student_id ORDER BY upload_date DESC");
+                        if ($completed->num_rows > 0):
                             while($c = $completed->fetch_assoc()):
-                                $eval_date = !empty($c['upload_date']) ? $c['upload_date'] : ($c['created_at'] ?? 'now');
                         ?>
                             <tr>
-                                <td><?php echo date("M d, Y", strtotime($eval_date)); ?></td>
+                                <td><?php echo date("M d, Y", strtotime($c['upload_date'])); ?></td>
                                 <td><strong><?php echo htmlspecialchars($c['evaluation_title']); ?></strong></td>
                                 <td><span style="font-weight:bold; color:#27ae60; font-size:16px;"><?php echo htmlspecialchars($c['competency_score']); ?></span><span style="color:#7f8c8d;">/100</span></td>
                                 <td><a href="admin_view_evaluation.php?id=<?php echo $c['id']; ?>" class="btn-view" style="background:#2c3e50;"><i class="fas fa-eye"></i> View Record</a></td>

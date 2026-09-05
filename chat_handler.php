@@ -1,12 +1,14 @@
 <?php
 session_start();
+// Removed the JSON header because we are now doing a normal page redirect
+
 ini_set('display_errors', 0);
 error_reporting(E_ALL);
 
-include_once __DIR__ . '/db_connect.php';
-include_once __DIR__ . '/ai_helper.php'; 
+include __DIR__ . '/db_connect.php';
+include __DIR__ . '/ai_helper.php'; 
 
-// TEXT EXTRACTION FUNCTION (Native PHP for DOCX/TXT)
+// 1. TEXT EXTRACTION FUNCTION (Native PHP for DOCX/TXT)
 function extractTextFromFile($filePath) {
     if (!file_exists($filePath)) {
         return "[System Error: File not found at path: $filePath]";
@@ -22,24 +24,17 @@ function extractTextFromFile($filePath) {
                 if (($index = $zip->locateName('word/document.xml')) !== false) {
                     $xml = $zip->getFromIndex($index);
                     $dom = new DOMDocument;
-                    @$dom->loadXML($xml, LIBXML_NOENT | LIBXML_XINCLUDE | LIBXML_NOERROR | LIBXML_NOWARNING);
+                    $dom->loadXML($xml, LIBXML_NOENT | LIBXML_XINCLUDE | LIBXML_NOERROR | LIBXML_NOWARNING);
                     $text = strip_tags($dom->saveXML());
                 } else {
                     $text = "[System Note: DOCX structure valid, but no text content found.]";
                 }
                 $zip->close();
             } else {
-                $text = "[System Note: Could not open DOCX.]";
+                $text = "[System Note: Could not open DOCX. File may be corrupted.]";
             }
         } else {
-            $xml = @shell_exec("unzip -p " . escapeshellarg($filePath) . " word/document.xml 2>/dev/null");
-            if ($xml) {
-                $dom = new DOMDocument;
-                @$dom->loadXML($xml, LIBXML_NOENT | LIBXML_XINCLUDE | LIBXML_NOERROR | LIBXML_NOWARNING);
-                $text = strip_tags($dom->saveXML());
-            } else {
-                $text = "[System Note: Server missing ZipArchive capability.]";
-            }
+            $text = "[System Note: Server missing ZipArchive capability.]";
         }
     } elseif ($ext === 'txt') {
         $text = file_get_contents($filePath);
@@ -48,9 +43,11 @@ function extractTextFromFile($filePath) {
     return substr(trim($text), 0, 15000); 
 }
 
+// 2. MAIN LOGIC
 $user_id = isset($_SESSION['user_id']) ? $_SESSION['user_id'] : 0;
 
 try {
+    // Using standard $_POST since we are using a real HTML form now
     $message = $_POST['message'] ?? '';
     $context = $_POST['context'] ?? '';
     $mode    = $_POST['mode'] ?? 'mentor';
@@ -96,34 +93,32 @@ try {
 
     // Generate Response
     if (!empty($message) && $user_id > 0) {
+        
         $stmt = $conn->prepare("INSERT INTO chat_logs (user_id, sender, message) VALUES (?, 'user', ?)");
-        if ($stmt) {
-            $stmt->bind_param("is", $user_id, $message);
-            $stmt->execute();
-        }
+        $stmt->bind_param("is", $user_id, $message);
+        $stmt->execute();
         
         $full_prompt = "CONTEXT:\n$context\n$file_text\n\nUSER QUESTION:\n$message";
+        
         $ai_response = generateAIResponse($full_prompt, $mode, $pdf_base64);
 
-        $stmt_ai = $conn->prepare("INSERT INTO chat_logs (user_id, sender, message) VALUES (?, 'ai', ?)");
-        if ($stmt_ai) {
-            $stmt_ai->bind_param("is", $user_id, $ai_response);
-            $stmt_ai->execute();
-        }
+        $stmt = $conn->prepare("INSERT INTO chat_logs (user_id, sender, message) VALUES (?, 'ai', ?)");
+        $stmt->bind_param("is", $user_id, $ai_response);
+        $stmt->execute();
     }
 
-} catch (Throwable $e) {
+} catch (Throwable $e) { // Changed to Throwable to catch severe fatal errors too
     if ($user_id > 0) {
+        // If there's a PHP error, tell the AI Copilot to print it in the chat box!
         $error_msg = "System Error: " . $e->getMessage();
-        $stmt_err = $conn->prepare("INSERT INTO chat_logs (user_id, sender, message) VALUES (?, 'ai', ?)");
-        if ($stmt_err) {
-            $stmt_err->bind_param("is", $user_id, $error_msg);
-            $stmt_err->execute();
-        }
+        $stmt = $conn->prepare("INSERT INTO chat_logs (user_id, sender, message) VALUES (?, 'ai', ?)");
+        $stmt->bind_param("is", $user_id, $error_msg);
+        $stmt->execute();
     }
 }
 
-// Redirect back to workspace
+// 3. THE MAGIC REDIRECT
+// This sends the browser seamlessly back to the workspace after the AI answers
 header("Location: student_portfolio.php");
 exit();
 ?>

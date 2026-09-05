@@ -1,29 +1,24 @@
 <?php
 session_start();
-include_once __DIR__ . '/db_connect.php';
+include __DIR__ . '/db_connect.php';
 include_once __DIR__ . '/ai_helper.php'; 
 
-if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'student_teacher') { 
-    header("Location: index.php"); 
-    exit(); 
-}
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'student_teacher') { header("Location: index.php"); exit(); }
 $user_id = $_SESSION['user_id'];
-$msg = ""; 
-$title_val = ""; 
-$desc_val = ""; 
+$msg = ""; $title_val = ""; $desc_val = ""; 
 $is_editing = false;
 $edit_id = isset($_GET['edit_id']) ? intval($_GET['edit_id']) : 0;
 
 // LOAD DATA IF EDITING
 if ($edit_id > 0) {
     $check = $conn->query("SELECT * FROM submissions WHERE id=$edit_id AND user_id=$user_id AND status='pending'");
-    if ($check && $check->num_rows > 0) {
+    if ($check->num_rows > 0) {
         $edit_data = $check->fetch_assoc();
         $title_val = $edit_data['title'];
         $desc_val = $edit_data['description'];
         $is_editing = true;
     } else {
-        $edit_id = 0;
+        $edit_id = 0; // Invalid edit request
     }
 }
 
@@ -33,42 +28,28 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['send_chat'])) {
     $context = $_POST['context'] ?? '';
     if (!empty($message)) {
         $stmt = $conn->prepare("INSERT INTO chat_logs (user_id, sender, message) VALUES (?, 'user', ?)");
-        if ($stmt) {
-            $stmt->bind_param("is", $user_id, $message); 
-            $stmt->execute();
-        }
-
+        $stmt->bind_param("is", $user_id, $message); $stmt->execute();
         $ai_response = generateAIResponse("Context:\n$context\n\nUser Question: $message", 'mentor');
+        $stmt = $conn->prepare("INSERT INTO chat_logs (user_id, sender, message) VALUES (?, 'ai', ?)");
+        $stmt->bind_param("is", $user_id, $ai_response); $stmt->execute();
         
-        $stmt_ai = $conn->prepare("INSERT INTO chat_logs (user_id, sender, message) VALUES (?, 'ai', ?)");
-        if ($stmt_ai) {
-            $stmt_ai->bind_param("is", $user_id, $ai_response); 
-            $stmt_ai->execute();
-        }
-        
+        // Return to same state (edit or new)
         $redirect = "student_portfolio.php";
-        if(isset($_POST['edit_id']) && intval($_POST['edit_id']) > 0) { 
-            $redirect .= "?edit_id=" . intval($_POST['edit_id']); 
-        }
-        header("Location: " . $redirect); 
-        exit();
+        if(isset($_POST['edit_id']) && $_POST['edit_id'] > 0) { $redirect .= "?edit_id=" . $_POST['edit_id']; }
+        header("Location: " . $redirect); exit();
     }
 }
 
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['upload_file'])) {
-    $title_val = trim($_POST['title'] ?? '');
-    $desc_val = trim($_POST['description'] ?? '');
+    $title_val = $_POST['title'];
+    $desc_val = $_POST['description'];
     $edit_id_post = isset($_POST['edit_id']) ? intval($_POST['edit_id']) : 0;
     
     $target_file = ""; 
     if (!empty($_FILES['file']['name'])) {
         $target_dir = "uploads/";
-        if (!is_dir(__DIR__ . '/' . $target_dir)) {
-            @mkdir(__DIR__ . '/' . $target_dir, 0777, true);
-        }
-        $file_basename = preg_replace('/[^a-zA-Z0-9_\.-]/', '_', basename($_FILES["file"]["name"]));
-        $target_file = $target_dir . $user_id . "_evidence_" . time() . "_" . $file_basename;
-        move_uploaded_file($_FILES["file"]["tmp_name"], __DIR__ . '/' . $target_file);
+        $target_file = $target_dir . $user_id . "_evidence_" . time() . "_" . basename($_FILES["file"]["name"]);
+        move_uploaded_file($_FILES["file"]["tmp_name"], $target_file);
     }
 
     if ($edit_id_post > 0) {
@@ -80,30 +61,25 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['upload_file'])) {
             $stmt = $conn->prepare("UPDATE submissions SET title=?, description=? WHERE id=? AND user_id=?");
             $stmt->bind_param("ssii", $title_val, $desc_val, $edit_id_post, $user_id);
         }
-        if ($stmt && $stmt->execute()) {
-            $msg = "Success! Your submission has been updated.";
-            $is_editing = true; 
-            $edit_id = $edit_id_post;
-        }
+        $stmt->execute();
+        $msg = "Success! Your submission has been updated.";
+        $is_editing = true; $edit_id = $edit_id_post;
     } else {
         // INSERT NEW
         $chat_transcript = "";
         $get_chats = $conn->query("SELECT * FROM chat_logs WHERE user_id=$user_id ORDER BY created_at ASC");
-        if ($get_chats && $get_chats->num_rows > 0) {
+        if ($get_chats->num_rows > 0) {
             while ($chat = $get_chats->fetch_assoc()) {
                 $sender_name = ($chat['sender'] == 'user') ? 'Student' : 'AI Copilot';
                 $chat_transcript .= "[" . $chat['created_at'] . "] " . $sender_name . ":\n" . $chat['message'] . "\n\n";
             }
         }
         $stmt = $conn->prepare("INSERT INTO submissions (user_id, title, description, file_path, chat_transcript) VALUES (?, ?, ?, ?, ?)");
-        if ($stmt) {
-            $stmt->bind_param("issss", $user_id, $title_val, $desc_val, $target_file, $chat_transcript);
-            if($stmt->execute()) { 
-                $msg = "Success! Your new portfolio has been submitted."; 
-                $title_val = ""; 
-                $desc_val = ""; 
-                $conn->query("DELETE FROM chat_logs WHERE user_id=$user_id");
-            }
+        $stmt->bind_param("issss", $user_id, $title_val, $desc_val, $target_file, $chat_transcript);
+        if($stmt->execute()) { 
+            $msg = "Success! Your new portfolio has been submitted."; 
+            $title_val = ""; $desc_val = ""; 
+            $conn->query("DELETE FROM chat_logs WHERE user_id=$user_id");
         }
     }
 }
@@ -203,7 +179,7 @@ $chat_history = $conn->query("SELECT * FROM chat_logs WHERE user_id=$user_id ORD
                                 <textarea name="description" id="editorContent" class="modern-textarea" rows="14" required><?php echo htmlspecialchars($desc_val); ?></textarea>
                             </div>
                             <div class="modern-input-group" style="background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px dashed #ccc;">
-                                <label class="modern-label"><i class="fas fa-paperclip"></i> <?php echo $is_editing ? 'Replace File Evidence (Optional)' : 'Attach File Evidence (.docx, .pdf, .txt)'; ?></label>
+                                <label class="modern-label"><i class="fas fa-paperclip"></i> <?php echo $is_editing ? 'Replace File Evidence (Optional)' : 'Attach File Evidence (.docx, .txt)'; ?></label>
                                 <input type="file" name="file" class="modern-input" style="border: none; padding: 0;">
                             </div>
                             <button type="submit" name="upload_file" class="btn-submit-premium">
@@ -221,7 +197,7 @@ $chat_history = $conn->query("SELECT * FROM chat_logs WHERE user_id=$user_id ORD
                     </div>
                     <div class="chat-container">
                         <div class="chat-history" id="chatHistory">
-                            <?php if ($chat_history && $chat_history->num_rows > 0): ?>
+                            <?php if ($chat_history->num_rows > 0): ?>
                                 <?php while($chat = $chat_history->fetch_assoc()): ?>
                                     <div class="message <?php echo $chat['sender']; ?>">
                                         <div class="sender-name"><?php echo ($chat['sender'] == 'user') ? 'You' : 'Copilot'; ?></div>
@@ -268,7 +244,7 @@ $chat_history = $conn->query("SELECT * FROM chat_logs WHERE user_id=$user_id ORD
                 let contextStr = "STUDENT DRAFT TEXT:\n" + editorContent.value;
                 const fileInput = document.querySelector('input[type="file"]');
                 if (fileInput && fileInput.files.length > 0) {
-                    contextStr += "\n\n[SYSTEM NOTE: The student attached a file: " + fileInput.files[0].name + "]";
+                    contextStr += "\n\n[SYSTEM NOTE: The student attached a file, but it hasn't uploaded yet. If the Draft Text above is empty, tell them you cannot read files until they submit.]";
                 }
                 hiddenContext.value = contextStr;
             }

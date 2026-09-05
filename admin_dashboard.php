@@ -1,25 +1,16 @@
 <?php
-ini_set('display_errors', 0);
+// TEMPORARY DEBUGGING: Force all fatal errors to print to the screen
+ini_set('display_errors', 1);
 error_reporting(E_ALL);
 session_start();
-include_once __DIR__ . '/db_connect.php';
+include 'db_connect.php';
 
-// Role validation: Redirect users cleanly to their appropriate dashboard without session destruction
-if (!isset($_SESSION['user_id'])) {
-    header("Location: index.php");
-    exit();
-}
-if ($_SESSION['role'] === 'student_teacher') {
-    header("Location: dashboard.php");
-    exit();
-}
-if ($_SESSION['role'] === 'supervisor') {
-    header("Location: supervisor_dashboard.php");
-    exit();
-}
-if ($_SESSION['role'] !== 'admin') {
-    header("Location: index.php");
-    exit();
+// 2. Loop-Breaker: If they aren't an admin, completely destroy the session before kicking them out
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') { 
+    session_unset();
+    session_destroy();
+    header("Location: index.php"); 
+    exit(); 
 }
 
 // --- STATISTICS ---
@@ -37,7 +28,7 @@ $sql_subs = "SELECT s.*, u.fullname, u.assigned_supervisor_id
              ORDER BY s.upload_date ASC";
 $pending_subs = $conn->query($sql_subs);
 
-// --- PASSWORD RESET REQUESTS ALERT ---
+// --- NEW ALERT: Password Reset Requests ---
 $reset_q = $conn->query("SELECT COUNT(*) as count FROM users WHERE reset_request = 1");
 $reset_count = $reset_q ? ($reset_q->fetch_assoc()['count'] ?? 0) : 0;
 

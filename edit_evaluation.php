@@ -32,7 +32,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     }
 
     $stmt = $conn->prepare("UPDATE evaluations SET evaluation_title=?, competency_score=?, readiness_notes=?, file_path=? WHERE id=?");
-    $stmt->bind_param("sissi", $eval_title, $score, $notes, $file_path, $id);
+    $stmt->bind_param("sisii", $eval_title, $score, $notes, $file_path, $id);
     
     if($stmt->execute()) {
         $msg = "Evaluation updated successfully!";
