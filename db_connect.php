@@ -1,12 +1,12 @@
 <?php
-// Fallbacks included to prevent Railway crashes
-$host = getenv('MYSQLHOST') ?: 'mysql.railway.internal';
-$user = getenv('MYSQLUSER') ?: 'root';
+// Fetch Railway's environment variables dynamically
+$host = getenv('MYSQLHOST');
+$user = getenv('MYSQLUSER');
 $pass = getenv('MYSQLPASSWORD');
-$db   = getenv('MYSQLDATABASE') ?: 'railway'; 
-$port = getenv('MYSQLPORT') ?: 3306;
+$db   = getenv('MYSQLDATABASE');
+$port = getenv('MYSQLPORT');
 
-// Connect AND select the database in one step
+// Establish the connection using the fetched variables
 $conn = mysqli_connect($host, $user, $pass, $db, $port);
 
 if (!$conn) {
